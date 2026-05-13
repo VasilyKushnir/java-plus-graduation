@@ -10,11 +10,13 @@
 hs_err_pid*
 replay_pid*
 out/
+.run
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+.DS_Store
 ### IntelliJ IDEA ###
 .idea
 *.iws
