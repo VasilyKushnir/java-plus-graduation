@@ -38,9 +38,9 @@
 	</properties>
 
 	<modules>
-		<module>main-service</module>
-		<module>stats-service</module>
 		<module>infra</module>
+		<module>core</module>
+		<module>stats-service</module>
 	</modules>
 
 	<dependencies>
