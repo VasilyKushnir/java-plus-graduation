@@ -1,12 +1,18 @@
 package client;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.client.ServiceInstance;
+import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.retry.backoff.FixedBackOffPolicy;
+import org.springframework.retry.policy.MaxAttemptsRetryPolicy;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.DefaultUriBuilderFactory;
@@ -22,16 +28,43 @@ import java.util.List;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class StatsClientImpl implements StatsClient {
 
-    private final RestTemplate restTemplate;
-    private final String baseUrl;
+    private final DiscoveryClient discoveryClient;
+    private String baseUrl;
 
-    public StatsClientImpl(
-        @Value("${stats.service.url:http://localhost:9090}") String baseUrl
-    ) {
-        this.restTemplate = this.getRestTemplate(baseUrl);
-        this.baseUrl = baseUrl;
+    private String getBaseUrl() {
+        if (baseUrl == null) {
+            RetryTemplate retryTemplate = new RetryTemplate();
+
+            FixedBackOffPolicy fixedBackOffPolicy = new FixedBackOffPolicy();
+            fixedBackOffPolicy.setBackOffPeriod(3000L);
+            retryTemplate.setBackOffPolicy(fixedBackOffPolicy);
+
+            MaxAttemptsRetryPolicy retryPolicy = new MaxAttemptsRetryPolicy();
+            retryPolicy.setMaxAttempts(3);
+            retryTemplate.setRetryPolicy(retryPolicy);
+
+            ServiceInstance instance = retryTemplate.execute(cxt -> getInstance());
+
+            this.baseUrl = "http://" + instance.getHost() + ":" + instance.getPort();
+        }
+
+        return this.baseUrl;
+    }
+
+    private ServiceInstance getInstance() {
+        try {
+            return discoveryClient
+                    .getInstances("stats-server")
+                    .getFirst();
+        } catch (Exception exception) {
+            throw new RuntimeException(
+                    "Ошибка обнаружения адреса сервиса статистики с id: stats-server",
+                    exception
+            );
+        }
     }
 
     private RestTemplate getRestTemplate(String url) {
@@ -49,8 +82,9 @@ public class StatsClientImpl implements StatsClient {
      */
     @Override
     public void hit(EndpointHitDto endpointHit) {
+        RestTemplate restTemplate = getRestTemplate(getBaseUrl());
         String url = UriComponentsBuilder
-                .fromHttpUrl(baseUrl)
+                .fromHttpUrl(getBaseUrl())
                 .path("/hit")
                 .toUriString();
 
@@ -70,7 +104,7 @@ public class StatsClientImpl implements StatsClient {
     ) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         UriComponentsBuilder builder = UriComponentsBuilder
-                .fromHttpUrl(baseUrl)
+                .fromHttpUrl(getBaseUrl())
                 .path("/stats")
                 .queryParam("start", start.format(formatter).replace(" ", "%20"))
                 .queryParam("end", end.format(formatter).replace(" ", "%20"));
@@ -85,6 +119,8 @@ public class StatsClientImpl implements StatsClient {
 
         URI uri = builder.build(true).toUri();
         log.info("getStats URI: {}", uri);
+
+        RestTemplate restTemplate = getRestTemplate(getBaseUrl());
 
         ResponseEntity<List<ViewStatsDto>> response = restTemplate.exchange(
                 uri,

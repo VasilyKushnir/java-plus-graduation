@@ -43,15 +43,6 @@
 		<module>stats-service</module>
 	</modules>
 
-	<dependencies>
-		<dependency>
-			<groupId>com.querydsl</groupId>
-			<artifactId>querydsl-jpa</artifactId>
-			<classifier>jakarta</classifier>
-			<version>5.0.0</version>
-		</dependency>
-	</dependencies>
-
 	<dependencyManagement>
 		<dependencies>
 			<dependency>
