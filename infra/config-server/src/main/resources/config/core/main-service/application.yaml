@@ -3,7 +3,10 @@ server:
 
 spring:
   datasource:
-    driver-class-name: org.postgresql.Driver
+    driverClassName: org.postgresql.Driver
+    url: jdbc:postgresql://localhost:5433/ewm-main
+    username: main
+    password: main
 
   sql:
     init:
