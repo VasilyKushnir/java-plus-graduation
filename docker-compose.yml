@@ -14,6 +14,21 @@ services:
       interval: 5s
       retries: 5
 
+  stats-server:
+    build:
+      context: .
+      dockerfile: stats-service/stats-server/Dockerfile
+    container_name: stats-server
+    depends_on:
+      stats-db:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://stats-db:5432/stats
+      SPRING_DATASOURCE_USERNAME: stats
+      SPRING_DATASOURCE_PASSWORD: stats
+
   ewm-db:
     image: postgres:16.1
     container_name: postgres-ewm-main-db
@@ -23,8 +38,28 @@ services:
       POSTGRES_DB: ewm-main
       POSTGRES_USER: main
       POSTGRES_PASSWORD: main
+    volumes:
+      - ./core/main-service/src/main/resources/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U main -d ewm-main"]
       interval: 5s
       retries: 5
 
+  ewm-service:
+    build:
+      context: .
+      dockerfile: main-service/Dockerfile
+    container_name: ewm-server
+    depends_on:
+      ewm-db:
+        condition: service_healthy
+      stats-server:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5433/ewm-main
+      SPRING_DATASOURCE_USERNAME: main
+      SPRING_DATASOURCE_PASSWORD: main
+      STATS_SERVICE_URL: http://stats-server:9090
