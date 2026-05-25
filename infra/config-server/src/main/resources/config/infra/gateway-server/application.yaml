@@ -354,7 +354,7 @@ management:
 
   health:
     circuitbreakers:
-      enabled: true
+      enabled: false
 
 logging:
   level:
