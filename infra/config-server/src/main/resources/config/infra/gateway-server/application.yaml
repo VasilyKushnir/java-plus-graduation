@@ -4,60 +4,372 @@ spring:
       discovery:
         locator:
           enabled: true
-      routes:
-        - id: main_service_admin_route
-          uri: lb://main-service
-          predicates:
-            - Path=/admin/**
-          filters:
-            - CircuitBreaker=myCircuitBreaker
 
-        - id: main_service_category_route
-          uri: lb://main-service
+      httpclient:
+        connect-timeout: 5000
+        response-timeout: 10s
+
+      routes:
+
+        # comment-service routes (feature)
+
+        - id: comment-service-private-event-comments
+          uri: lb://comment-service
+          predicates:
+            - Path=/admin/users/{userId}/events/{eventId}/comments
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: commentServiceCircuitBreaker
+                fallbackUri: forward:/fallback/comment-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+                backoff:
+                  firstBackoff: 200ms
+                  maxBackoff: 2s
+                  factor: 2
+                  basedOnPreviousValue: true
+
+        - id: comment-service-private-user-comments
+          uri: lb://comment-service
+          predicates:
+            - Path=/admin/users/{userId}/comments/{commentId}
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: commentServiceCircuitBreaker
+                fallbackUri: forward:/fallback/comment-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: comment-service-public
+          uri: lb://comment-service
+          predicates:
+            - Path=/events/{eventId}/comments,/comments
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: commentServiceCircuitBreaker
+                fallbackUri: forward:/fallback/comment-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: comment-service-admin
+          uri: lb://comment-service
+          predicates:
+            - Path=/admin/comments/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: commentServiceCircuitBreaker
+                fallbackUri: forward:/fallback/comment-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        # user-service routes
+
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/admin/users/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userServiceCircuitBreaker
+                fallbackUri: forward:/fallback/user-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        # request service routes
+
+        - id: request-service-events-requests
+          uri: lb://request-service
+          predicates:
+            - Path=/users/{userId}/events/{eventId}/requests/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: requestServiceCircuitBreaker
+                fallbackUri: forward:/fallback/request-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: request-service-user-requests
+          uri: lb://request-service
+          predicates:
+            - Path=/users/{userId}/requests/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: requestServiceCircuitBreaker
+                fallbackUri: forward:/fallback/request-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: request-service-count
+          uri: lb://request-service
+          predicates:
+            - Path=/events/requests/confirmed
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: requestServiceCircuitBreaker
+                fallbackUri: forward:/fallback/request-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        # event-service routes
+
+        - id: event-service-admin-categories
+          uri: lb://event-service
+          predicates:
+            - Path=/admin/categories/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCircuitBreaker
+                fallbackUri: forward:/fallback/event-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: event-service-categories
+          uri: lb://event-service
           predicates:
             - Path=/categories/**
           filters:
-            - CircuitBreaker=myCircuitBreaker
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCircuitBreaker
+                fallbackUri: forward:/fallback/event-service
 
-        - id: main_service_events_route
-          uri: lb://main-service
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: event-service-admin-compilations
+          uri: lb://event-service
           predicates:
-            - Path=/events/**
+            - Path=/admin/compilations/**
           filters:
-            - CircuitBreaker=myCircuitBreaker
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCircuitBreaker
+                fallbackUri: forward:/fallback/event-service
 
-        - id: main_service_comments_route
-          uri: lb://main-service
-          predicates:
-            - Path=/comments/**
-          filters:
-            - CircuitBreaker=myCircuitBreaker
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
 
-        - id: main_service_compilations_route
-          uri: lb://main-service
+        - id: event-service-compilations
+          uri: lb://event-service
           predicates:
             - Path=/compilations/**
           filters:
-            - CircuitBreaker=myCircuitBreaker
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCircuitBreaker
+                fallbackUri: forward:/fallback/event-service
 
-        - id: main_service_users_route
-          uri: lb://main-service
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: event-service-admin-events
+          uri: lb://event-service
           predicates:
-            - Path=/users/**
+            - Path=/admin/events/**
           filters:
-            - CircuitBreaker=myCircuitBreaker
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCircuitBreaker
+                fallbackUri: forward:/fallback/event-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: event-service-events
+          uri: lb://event-service
+          predicates:
+            - Path=/events/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCircuitBreaker
+                fallbackUri: forward:/fallback/event-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
+
+        - id: event-service-user-events
+          uri: lb://event-service
+          predicates:
+            - Path=/users/{userId}/events/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: eventServiceCircuitBreaker
+                fallbackUri: forward:/fallback/event-service
+
+            - name: Retry
+              args:
+                retries: 3
+                methods: GET,POST,PUT,DELETE
+                statuses: BAD_GATEWAY,GATEWAY_TIMEOUT,SERVICE_UNAVAILABLE
 
 server:
   port: 8080
 
 resilience4j:
+
   circuitbreaker:
     instances:
-      myCircuitBreaker:
-        slidingWindowSize: 10
-        failureRateThreshold: 50
-        waitDurationInOpenState: 10000
-        permittedNumberOfCallsInHalfOpenState: 3
+
+      commentServiceCircuitBreaker:
+        slidingWindowSize: 20
         slidingWindowType: COUNT_BASED
-        minimumNumberOfCalls: 5
+        minimumNumberOfCalls: 10
+        permittedNumberOfCallsInHalfOpenState: 5
+        waitDurationInOpenState: 15s
+        failureRateThreshold: 50
         automaticTransitionFromOpenToHalfOpenEnabled: true
+
+      userServiceCircuitBreaker:
+        slidingWindowSize: 20
+        slidingWindowType: COUNT_BASED
+        minimumNumberOfCalls: 10
+        permittedNumberOfCallsInHalfOpenState: 5
+        waitDurationInOpenState: 15s
+        failureRateThreshold: 50
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+
+      requestServiceCircuitBreaker:
+        slidingWindowSize: 20
+        slidingWindowType: COUNT_BASED
+        minimumNumberOfCalls: 10
+        permittedNumberOfCallsInHalfOpenState: 5
+        waitDurationInOpenState: 15s
+        failureRateThreshold: 50
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+
+      eventServiceCircuitBreaker:
+        slidingWindowSize: 20
+        slidingWindowType: COUNT_BASED
+        minimumNumberOfCalls: 10
+        permittedNumberOfCallsInHalfOpenState: 5
+        waitDurationInOpenState: 15s
+        failureRateThreshold: 50
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+
+  retry:
+    instances:
+
+      commentServiceCircuitBreaker:
+        maxAttempts: 3
+        waitDuration: 500ms
+
+      userServiceCircuitBreaker:
+        maxAttempts: 3
+        waitDuration: 500ms
+
+      requestServiceCircuitBreaker:
+        maxAttempts: 3
+        waitDuration: 500ms
+
+      eventServiceCircuitBreaker:
+        maxAttempts: 3
+        waitDuration: 500ms
+
+  timelimiter:
+    instances:
+
+      commentServiceCircuitBreaker:
+        timeoutDuration: 10s
+
+      userServiceCircuitBreaker:
+        timeoutDuration: 10s
+
+      requestServiceCircuitBreaker:
+        timeoutDuration: 10s
+
+      eventServiceCircuitBreaker:
+        timeoutDuration: 10s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway,metrics,prometheus,circuitbreakers,circuitbreakerevents
+
+  endpoint:
+    health:
+      show-details: always
+
+  health:
+    circuitbreakers:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.cloud.loadbalancer: DEBUG
+
+    reactor.netty: DEBUG
+    reactor.netty.http.client: DEBUG
+    reactor.netty.http.server: DEBUG
+
+    io.github.resilience4j: DEBUG
+    io.github.resilience4j.circuitbreaker: DEBUG
+    io.github.resilience4j.retry: DEBUG
+    io.github.resilience4j.timelimiter: DEBUG
+
+    org.springframework.boot.actuate: DEBUG

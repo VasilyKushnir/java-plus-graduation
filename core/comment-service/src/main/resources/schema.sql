@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS comments (
+    id BIGSERIAL PRIMARY KEY,
+    event_id BIGINT NOT NULL,
+    author_id BIGINT NOT NULL,
+    text VARCHAR(5000) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'NEW',
+    created_on TIMESTAMP NOT NULL,
+    updated_on TIMESTAMP
+);
