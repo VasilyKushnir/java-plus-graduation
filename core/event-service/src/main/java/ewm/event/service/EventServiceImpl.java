@@ -300,9 +300,6 @@ public class EventServiceImpl implements EventService {
         Map<Long, UserShortDto> initiators = getInitiatorsDtoForEvents(eventList);
         Map<Long, CategoryDto> categories = getCategoriesDtoForEvents(eventList);
 
-        System.out.println(eventList);
-        System.out.println(initiators);
-
         return eventList.stream()
                 .map(e -> EventMapper.mapToEventFullDto(
                         e,

@@ -8,59 +8,67 @@ import ewm.event.repository.DatabaseEventRepository;
 import ewm.interaction.dto.compilation.CompilationDto;
 import ewm.interaction.dto.compilation.NewCompilationDto;
 import ewm.interaction.dto.compilation.UpdateCompilationRequest;
+import ewm.interaction.dto.event.EventShortDto;
 import ewm.interaction.exception.NotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class CompilationServiceImpl implements CompilationService {
-
     private final CompilationRepository compilationRepository;
     private final DatabaseEventRepository eventRepository;
     private final EventService eventService;
 
+    private final TransactionTemplate transactionTemplate;
+
     @Override
-    @Transactional
     public CompilationDto create(NewCompilationDto dto) {
-        Compilation comp = new Compilation();
-        comp.setTitle(dto.getTitle());
-        comp.setPinned(dto.getPinned() != null ? dto.getPinned() : false);
+        Compilation saved = transactionTemplate.execute(status -> {
+            Compilation comp = new Compilation();
 
-        Set<Event> events = loadEvents(dto.getEvents());
-        comp.setEvents(events);
+            comp.setTitle(dto.getTitle());
+            comp.setPinned(dto.getPinned() != null ? dto.getPinned() : false);
 
-        Compilation saved = compilationRepository.save(comp);
-        return CompilationMapper.toDto(saved, eventService.mapToEventShortDto(new ArrayList<>(events)));
+            Set<Event> events = loadEvents(dto.getEvents());
+            comp.setEvents(events);
+
+            return compilationRepository.save(comp);
+        });
+
+        assert saved != null;
+        return CompilationMapper.toDto(saved, eventService.mapToEventShortDto(new ArrayList<>(saved.getEvents())));
     }
 
+
     @Override
-    @Transactional
     public CompilationDto update(Long compId, UpdateCompilationRequest dto) {
-        Compilation comp = compilationRepository.findById(compId)
-                .orElseThrow(() -> new NotFoundException("Compilation not found: " + compId));
+        Compilation saved = transactionTemplate.execute(status -> {
+            Compilation comp = compilationRepository.findById(compId)
+                    .orElseThrow(() -> new NotFoundException("Compilation not found: " + compId));
 
-        if (dto.getTitle() != null) {
-            comp.setTitle(dto.getTitle());
-        }
-        if (dto.getPinned() != null) {
-            comp.setPinned(dto.getPinned());
-        }
-        if (dto.getEvents() != null) {
-            comp.setEvents(loadEvents(dto.getEvents()));
-        }
+            if (dto.getTitle() != null) {
+                comp.setTitle(dto.getTitle());
+            }
+            if (dto.getPinned() != null) {
+                comp.setPinned(dto.getPinned());
+            }
+            if (dto.getEvents() != null) {
+                comp.setEvents(loadEvents(dto.getEvents()));
+            }
 
-        Compilation saved = compilationRepository.save(comp);
-        return CompilationMapper.toDto(saved, eventService.mapToEventShortDto(new ArrayList<>(comp.getEvents())));
+            return compilationRepository.save(comp);
+        });
+
+        assert saved != null;
+        return CompilationMapper.toDto(saved, eventService.mapToEventShortDto(new ArrayList<>(saved.getEvents())));
     }
 
     @Override
@@ -73,7 +81,6 @@ public class CompilationServiceImpl implements CompilationService {
     }
 
     @Override
-    @Transactional(readOnly = true)
     public List<CompilationDto> findAll(Boolean pinned, int from, int size) {
         Pageable pageable = PageRequest.of(from / size, size);
 
@@ -81,18 +88,27 @@ public class CompilationServiceImpl implements CompilationService {
                 ? compilationRepository.findAll(pageable).getContent()
                 : compilationRepository.findAllByPinned(pinned, pageable);
 
-        return comps.stream()
-                .map(c -> CompilationMapper.toDto(
-                        c, eventService.mapToEventShortDto(new ArrayList<>(c.getEvents()))))
-                .toList();
+        return mapToDtos(comps);
     }
 
     @Override
-    @Transactional(readOnly = true)
     public CompilationDto findById(Long compId) {
         Compilation comp = compilationRepository.findById(compId)
                 .orElseThrow(() -> new NotFoundException("Compilation not found: " + compId));
         return CompilationMapper.toDto(comp, eventService.mapToEventShortDto(new ArrayList<>(comp.getEvents())));
+    }
+
+    private List<CompilationDto> mapToDtos(List<Compilation> comps) {
+        Set<Event> events = new HashSet<>();
+        for (Compilation comp : comps) {
+            events.addAll(comp.getEvents());
+        }
+        Map<Long, EventShortDto> eventDtos = eventService.mapToEventShortDto(new ArrayList<>(events))
+                .stream().collect(Collectors.toMap(EventShortDto::getId, e -> e));
+
+        return comps.stream().map(
+                c -> CompilationMapper.toDto(c,
+                        c.getEvents().stream().map(e -> eventDtos.get(e.getId())).toList())).toList();
     }
 
     private Set<Event> loadEvents(Set<Long> eventIds) {

@@ -26,9 +26,6 @@ import java.util.stream.Collectors;
 public class ParticipationRequestServiceImpl implements ParticipationRequestService {
 
     private final ParticipationRequestRepository requestRepo;
-//    private final UserRepository userRepo;
-//    private final EventRepository eventRepo;
-
     private final UserClient userClient;
     private final EventClient eventClient;
 
@@ -95,11 +92,6 @@ public class ParticipationRequestServiceImpl implements ParticipationRequestServ
     public ParticipationRequestDto cancel(Long userId, Long requestId) {
         ParticipationRequest req = requestRepo.findByIdAndRequesterId(requestId, userId)
                 .orElseThrow(() -> new NotFoundException("Request not found: " + requestId));
-
-//        if (req.getStatus() == RequestStatus.CONFIRMED) {
-//            Event event = req.getEvent();
-//            event.setConfirmedRequests(Math.max(0, event.getConfirmedRequests() - 1));
-//        }
 
         req.setStatus(RequestStatus.CANCELED);
         return ParticipationRequestMapper.toDto(req);
@@ -186,7 +178,6 @@ public class ParticipationRequestServiceImpl implements ParticipationRequestServ
             }
         }
 
-//        event.setConfirmedRequests(confirmed);
         return toResult(confirmedOut, rejectedOut);
     }
 
