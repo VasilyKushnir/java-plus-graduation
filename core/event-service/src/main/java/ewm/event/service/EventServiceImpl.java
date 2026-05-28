@@ -16,18 +16,10 @@ import ewm.interaction.dto.user.UserDto;
 import ewm.interaction.dto.user.UserShortDto;
 import ewm.interaction.enums.EventSort;
 import ewm.interaction.enums.EventState;
-import ewm.interaction.enums.EventStateActionAdmin;
-import ewm.interaction.exception.BadRequestException;
-import ewm.interaction.exception.ConflictException;
-import ewm.interaction.exception.NotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.stats.dto.EndpointHitDto;
 import ru.practicum.ewm.stats.dto.ViewStatsDto;
 
@@ -42,49 +34,28 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class EventServiceImpl implements EventService {
-    private final EventRepository eventRepository;
-    private final DatabaseEventSearchRepository  databaseEventSearchRepository;
     private final CategoryRepository categoryRepository;
     private final StatsClient statsClient;
 
     private final UserClient userClient;
     private final RequestClient requestClient;
 
+    private final EventTransactionalService eventTxService;
+
     @Override
-    @Transactional
     public EventFullDto create(Long userId, NewEventDto eventDto) {
-        isEventTimeValid(eventDto.getEventDate());
-
         UserDto user = userClient.getUser(userId);
-        Category category = categoryRepository.findById(eventDto.getCategory())
-                .orElseThrow(() -> new NotFoundException("Category not found"));
-
-        Event event = EventMapper.mapToEvent(user.getId(), eventDto, category.getId());
-        event.setCreatedOn(LocalDateTime.now());
-        event.setState(EventState.PENDING);
-        event = eventRepository.save(event);
-
-        List<Event> eventList = List.of(event);
-
-        return this.mapToEventFullDto(eventList).getFirst();
+        Event event = eventTxService.createTransactional(user, eventDto);
+        return this.mapToEventFullDto(List.of(event)).getFirst();
     }
 
     @Override
-    @Transactional(readOnly = true)
     public EventFullDto get(Long userId, Long eventId) {
-        Event event = eventRepository.findById(eventId)
-                .orElseThrow(() -> new NotFoundException("Event not found"));
-        if (!event.getInitiatorId().equals(userId)) {
-            throw new NotFoundException("Event not found");
-        }
-
-        List<Event> eventList = List.of(event);
-
-        return this.mapToEventFullDto(eventList).getFirst();
+        Event event = eventTxService.getTransactional(userId, eventId);
+        return this.mapToEventFullDto(List.of(event)).getFirst();
     }
 
     @Override
-    @Transactional(readOnly = true)
     public List<EventFullDto> get(List<Long> users,
                                   List<EventState> states,
                                   List<Long> categories,
@@ -92,43 +63,27 @@ public class EventServiceImpl implements EventService {
                                   LocalDateTime rangeEnd,
                                   int from,
                                   int size) {
-        Pageable page = PageRequest.of(from / size, size);
-
-        List<Event> eventList = databaseEventSearchRepository.findForAdmin(users, states, categories, rangeStart, rangeEnd, page);
+        List<Event> eventList = eventTxService
+                .getTransactional(users, states, categories, rangeStart, rangeEnd, from, size);
 
         return this.mapToEventFullDto(eventList);
     }
 
     @Override
-    @Transactional(readOnly = true)
     public EventFullDto getPublicEvent(Long eventId, HttpServletRequest request) {
-        Event event = eventRepository.findById(eventId)
-                .orElseThrow(() -> new NotFoundException("Event not found"));
-
-        if (event.getState() != EventState.PUBLISHED) {
-            throw new NotFoundException("Event is not published");
-        }
-
-        List<Event> eventList = List.of(event);
+        Event event = eventTxService.getPublicEventTransactional(eventId);
         registerHit(request);
-
-        return this.mapToEventFullDto(eventList).getFirst();
+        return this.mapToEventFullDto(List.of(event)).getFirst();
     }
 
     @Override
-    @Transactional(readOnly = true)
     public List<EventShortDto> getEvents(Long userId, int from, int size) {
         userClient.getUser(userId);
-
-        Pageable page = PageRequest.of(from / size, size);
-
-        List<Event> eventList = eventRepository.findByInitiatorId(userId, page);
-
+        List<Event> eventList = eventTxService.getEventsTransactional(userId, from, size);
         return this.mapToEventShortDto(eventList);
     }
 
     @Override
-    @Transactional(readOnly = true)
     public List<EventShortDto> getPublicEvents(String text,
                                                List<Long> categories,
                                                Boolean paid,
@@ -140,112 +95,32 @@ public class EventServiceImpl implements EventService {
                                                int size,
                                                HttpServletRequest request) {
 
-        if (rangeStart == null) rangeStart = LocalDateTime.now();
-        if (rangeEnd != null && rangeEnd.isBefore(rangeStart)) {
-            throw new BadRequestException("Range start must be before rangeEnd");
-        }
-
-        // Pageable: сортировка только по eventDate, не по views
-        Pageable page;
-        if (sort == EventSort.EVENT_DATE) {
-            page = PageRequest.of(from / size, size, Sort.by(Sort.Direction.DESC, "eventDate"));
-        } else {
-            page = PageRequest.of(from / size, size);
-        }
-
-        registerHit(request);
-
-        List<Event> eventList = databaseEventSearchRepository.findPublicEvents(
-                text, categories, paid, rangeStart, rangeEnd, onlyAvailable, page
-        );
+        List<Event> eventList = eventTxService.getPublicEventsTransactional(text,
+                categories, paid, rangeStart, rangeEnd, onlyAvailable, sort, from, size);
 
         List<EventShortDto> dtos = mapToEventShortDto(eventList);
-
         if (sort == EventSort.VIEWS) {
             dtos.sort(Comparator.comparingLong(EventShortDto::getViews).reversed());
         }
+
+        registerHit(request);
 
         return dtos;
     }
 
 
     @Override
-    @Transactional
     public EventFullDto update(Long userId, Long eventId, UpdateEventUserRequest updateEventUserRequest) {
-        Event currentEvent = eventRepository.findById(eventId)
-                .orElseThrow(() -> new NotFoundException("Event not found"));
-
-        if (currentEvent.getState().equals(EventState.PUBLISHED)) {
-            throw new ConflictException("Event is already published");
-        }
-
-        if (!currentEvent.getInitiatorId().equals(userId)) {
-            throw new BadRequestException("User not allowed to update event");
-        }
-
-        Event updatedEvent = EventMapper.updateEvent(currentEvent, updateEventUserRequest);
-
-        if (updateEventUserRequest.hasCategory() &&
-                !updatedEvent.getCategoryId().equals(updateEventUserRequest.getCategory())) {
-            Category category = categoryRepository.findById(updateEventUserRequest.getCategory())
-                            .orElseThrow(() -> new NotFoundException("Category not found"));
-            updatedEvent.setCategoryId(category.getId());
-        }
-
-        isEventTimeValid(updatedEvent.getEventDate());
-        updatedEvent = eventRepository.save(updatedEvent);
-
-
+        Event updatedEvent = eventTxService.updateTransactional(userId, eventId, updateEventUserRequest);
         List<Event> eventList = List.of(updatedEvent);
-
         return this.mapToEventFullDto(eventList).getFirst();
     }
 
     @Override
-    @Transactional
     public EventFullDto update(Long eventId, UpdateEventAdminRequest updateEventAdminRequest) {
-        Event currentEvent = eventRepository.findById(eventId)
-                .orElseThrow(() -> new NotFoundException("Event not found"));
-
-        if (currentEvent.getState().equals(EventState.PUBLISHED) &&
-                updateEventAdminRequest.getEventDate() != null &&
-                updateEventAdminRequest.getEventDate().isAfter(currentEvent.getPublishedOn().minusHours(1))) {
-            throw new ConflictException("Invalid event time");
-        }
-
-        if (updateEventAdminRequest.getStateAction() != null) {
-            if (currentEvent.getState().equals(EventState.PENDING)) {
-                if (updateEventAdminRequest.getStateAction().equals(EventStateActionAdmin.PUBLISH_EVENT)) {
-                    currentEvent.setState(EventState.PUBLISHED);
-                    currentEvent.setPublishedOn(LocalDateTime.now());
-                } else {
-                    currentEvent.setState(EventState.CANCELED);
-                }
-            } else {
-                throw new ConflictException("Invalid event state");
-            }
-        }
-
-        Event updatedEvent = EventMapper.updateEvent(currentEvent, updateEventAdminRequest);
-
-        if (updateEventAdminRequest.hasCategory() &&
-                !updatedEvent.getCategoryId().equals(updateEventAdminRequest.getCategory())) {
-            Category category = categoryRepository.findById(updateEventAdminRequest.getCategory())
-                    .orElseThrow(() -> new NotFoundException("Category not found"));
-            updatedEvent.setCategoryId(category.getId());
-        }
-
-        updatedEvent = eventRepository.save(updatedEvent);
-
+        Event updatedEvent = eventTxService.updateTransactional(eventId, updateEventAdminRequest);
         List<Event> eventList = List.of(updatedEvent);
-
         return this.mapToEventFullDto(eventList).getFirst();
-    }
-
-    private void isEventTimeValid(LocalDateTime eventTime) {
-        if (eventTime.isBefore(LocalDateTime.now().plusHours(2))) {
-            throw new BadRequestException("Invalid event time");
-        }
     }
 
     private void registerHit(HttpServletRequest request) {
