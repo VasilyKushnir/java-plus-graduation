@@ -1,90 +1,282 @@
-# Comment API Documentation
+# 🚀 ExploreWithMe — Graduation Project
 
-## Overview
+<div align="center">
 
-API комментариев позволяет пользователям добавлять, обновлять и удалять комментарии к опубликованным событиям. Комментарии проходят процедуру модерации, в ходе которой администраторы могут одобрять или отклонять их. Только одобренные комментарии видны в публичных эндпоинтах.
-## Comment Statuses
+## Платформа для организации и поиска совместных событий
 
-Comments can have one of three statuses:
+Микросервисное приложение для публикации, поиска и управления мероприятиями.
 
-- **NEW** - Начальный статус при создании или обновлении комментария
-- **APPROVED** - Комментарий был одобрен администратором
-- **REJECTED** - Комментарий был отклонен администратором
+![Java](https://img.shields.io/badge/Java-21-orange?style=for-the-badge\&logo=openjdk)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.x-6DB33F?style=for-the-badge\&logo=springboot)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge\&logo=postgresql\&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge\&logo=docker\&logoColor=white)
+![Spring Cloud](https://img.shields.io/badge/Spring_Cloud-2023-blue?style=for-the-badge)
 
-## API Endpoints
+</div>
 
-### Public Endpoints
+---
 
-#### 1. Получение комментариев к мероприятию
+## ✨ О проекте
 
-Получение всех одобренных комментариев к конкретному событию с разбивкой по страницам.
+**ExploreWithMe** — это сервис для поиска и организации совместного участия в событиях.
 
-**Endpoint:** `GET /events/{eventId}/comments`
+Платформа позволяет пользователям:
 
-**Path Parameters:**
-- `eventId` (Long, required)
+* 🎉 создавать собственные мероприятия;
+* 🔍 искать события по категориям;
+* 👥 собирать участников;
+* ✅ управлять заявками на участие;
+* 📊 анализировать популярность событий;
+* 💬 взаимодействовать через комментарии;
+* ⭐ получать персональные рекомендации.
 
-**Query Parameters:**
-- `from` (int, default: 0)
-- `size` (int, default: 10)
+Проект реализован в формате **микросервисной архитектуры** с четким разделением ответственности между сервисами.
 
-#### 2. Получение всех комментариев
+Отдельный сервис статистики собирает информацию о просмотрах событий и обращениях к API, позволяя анализировать активность пользователей и популярность мероприятий.
 
-Получение всех одобренных комментариев ко всем событиям с разбивкой по страницам.
+---
 
-**Endpoint:** `GET /comments`
+# 🏗 Архитектура проекта
 
-**Query Parameters:**
-- `from` (int, default: 0)
-- `size` (int, default: 10)
+## Общая схема
 
-### Private Endpoints (User)
+```mermaid
+flowchart TD
+    Client[👤 Client Applications]
 
-#### 3. Добавление комментария
+    Gateway[🌐 Gateway Server]
+    Discovery[📡 Discovery Server]
+    Config[⚙️ Config Server]
 
+    Event[🎉 Event Service]
+    Request[✅ Request Service]
+    User[👤 User Service]
+    Comment[💬 Comment Service]
+    Stats[📊 Stats Server]
 
-**Endpoint:** `POST /users/{userId}/events/{eventId}/comments`
+    Client --> Gateway
 
-**Path Parameters:**
-- `userId` (Long, required)
-- `eventId` (Long, required)
+    Gateway --> Event
+    Gateway --> Request
+    Gateway --> User
+    Gateway --> Comment
 
-#### 4. Обновление комментария
+    Event --> Stats
+    Request --> Event
+    Comment --> User
+    Comment --> Event
 
-Update an existing comment. Only the comment owner can update their comment. Updating a comment resets its status to `NEW` for moderation.
+    Event --> Discovery
+    Request --> Discovery
+    User --> Discovery
+    Comment --> Discovery
+    Stats --> Discovery
+    Gateway --> Discovery
 
-**Endpoint:** `PATCH /users/{userId}/comments/{commentId}`
+    Event --> Config
+    Request --> Config
+    User --> Config
+    Comment --> Config
+    Stats --> Config
+    Gateway --> Config
+```
 
-**Path Parameters:**
-- `userId` (Long, required)
-- `commentId` (Long, required)
+---
 
-#### 5. Удаление комментария
+# 🧩 Основные модули
 
-**Endpoint:** `DELETE /users/{userId}/comments/{commentId}`
+## Core Services
 
-**Path Parameters:**
-- `userId` (Long, required)
-- `commentId` (Long, required)
+| Сервис               | Назначение                                     |
+| -------------------- | ---------------------------------------------- |
+| 🎉 `event-service`   | Управление событиями, категориями и подборками |
+| ✅ `request-service`  | Обработка заявок на участие                    |
+| 👤 `user-service`    | Управление пользователями                      |
+| 💬 `comment-service` | Работа с комментариями                         |
 
-### Admin Endpoints
+---
 
-#### 6. Одобрение комментария
+## Stats Service
 
-Approve a comment, making it visible through public endpoints.
+| Сервис            | Назначение                                   |
+| ----------------- | -------------------------------------------- |
+| 📊 `stats-server` | Сбор статистики просмотров и обращений к API |
 
-**Endpoint:** `PATCH /admin/comments/{commentId}/approve`
+---
 
-**Path Parameters:**
-- `commentId` (Long, required)
+## Infrastructure
 
+| Сервис                | Назначение                                  |
+| --------------------- | ------------------------------------------- |
+| 🌐 `gateway-server`   | Единая точка входа и маршрутизация запросов |
+| 📡 `discovery-server` | Регистрация и обнаружение сервисов (Eureka) |
+| ⚙️ `config-server`    | Централизованное хранение конфигурации      |
 
-#### 7. Отклонение комментария
+---
 
-Reject a comment, making it invisible through public endpoints.
+# 🔄 Взаимодействие сервисов
 
-**Endpoint:** `PATCH /admin/comments/{commentId}/reject`
+Взаимодействие построено на инфраструктуре **Spring Cloud**:
 
-**Path Parameters:**
-- `commentId` (Long, required) - ID of the comment to reject
+1. 📡 Все сервисы регистрируются в `discovery-server`
+2. ⚙️ Конфигурации загружаются из `config-server`
+3. 🌐 Внешние запросы поступают через `gateway-server`
+4. 🔗 Сервисы взаимодействуют между собой по HTTP
+5. 📊 `stats-server` собирает статистику просмотров событий
 
+---
+
+# ⚙️ Конфигурация сервисов
+
+## Локальные конфигурации
+
+```text
+*/src/main/resources/application.yaml
+```
+
+## Централизованные конфигурации
+
+```text
+infra/config-server/src/main/resources/config
+```
+
+### Структура конфигураций
+
+```text
+infra/config-server/src/main/resources/config/
+├── core/
+│   ├── event-service
+│   ├── request-service
+│   ├── user-service
+│   └── comment-service
+│
+├── stat/
+│   └── stats-server
+│
+└── infra/
+    └── gateway-server
+```
+
+---
+
+# 🔌 Внутренний API
+
+Внутреннее взаимодействие сервисов осуществляется через REST API.
+
+## Основные сценарии взаимодействия
+
+### 🎉 Event Service
+
+* взаимодействует со `stats-server`
+* сохраняет статистику просмотров
+* получает аналитические данные
+
+### ✅ Request Service
+
+* проверяет состояние события
+* контролирует лимиты участников
+* управляет подтверждением заявок
+
+### 💬 Comment Service
+
+* валидирует пользователей
+* проверяет доступность событий
+* управляет комментариями
+
+### 🌐 Gateway Server
+
+* маршрутизирует запросы
+* выполняет роль API Gateway
+* обеспечивает единый вход в систему
+
+---
+
+# 🌍 Внешний API
+
+## Спецификации OpenAPI
+
+### Основной сервис
+
+```text
+/ewm-main-service-spec.json
+```
+
+### Сервис статистики
+
+```text
+/ewm-stats-service-spec.json
+```
+
+## Swagger Editor
+
+Для просмотра спецификаций:
+
+👉 [https://editor.swagger.io/](https://editor.swagger.io/)
+
+---
+
+# 🛠 Технологии
+
+<div align="center">
+
+| Backend       | Infrastructure | Database        | Tools   |
+| ------------- | -------------- | --------------- | ------- |
+| Java 21       | Spring Cloud   | PostgreSQL      | Maven   |
+| Spring Boot 3 | Eureka         | JPA / Hibernate | Docker  |
+| REST API      | Gateway        | SQL             | OpenAPI |
+
+</div>
+
+---
+
+# 📦 Стек проекта
+
+```text
+Java 21
+Spring Boot 3
+Spring Cloud
+Spring Data JPA
+PostgreSQL
+Docker / Docker Compose
+Eureka Discovery Server
+Spring Cloud Gateway
+Spring Cloud Config Server
+OpenAPI / Swagger
+```
+
+---
+
+# 🚀 Возможности платформы
+
+* 🔐 Публичное и приватное API
+* 🛡 Административная модерация
+* 📊 Система аналитики просмотров
+* 🔎 Поиск и фильтрация мероприятий
+* 👥 Управление участниками
+* 💬 Комментарии и взаимодействие
+* ☁️ Централизованная конфигурация
+* ⚡ Масштабируемая микросервисная архитектура
+
+---
+
+# 📚 Архитектурные особенности
+
+## Почему микросервисы?
+
+Проект разделён на независимые сервисы для:
+
+* масштабируемости;
+* независимого деплоя;
+* отказоустойчивости;
+* удобной поддержки;
+* разделения ответственности.
+
+---
+
+<div align="center">
+
+## ⭐ ExploreWithMe
+
+Платформа для совместных событий, построенная на современном стеке Java + Spring Cloud.
+
+</div>
