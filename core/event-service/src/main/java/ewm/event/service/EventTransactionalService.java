@@ -23,8 +23,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.swing.*;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -177,6 +179,16 @@ public class EventTransactionalService {
         }
 
         return eventRepository.save(updatedEvent);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Event> getAllByIdTransactional(List<Long> ids) {
+        return eventRepository.findAllByIdIn(ids);
+    }
+
+    @Transactional(readOnly = true)
+    public Event findByIdTransactional(Long id) {
+        return eventRepository.findById(id).orElseThrow(() -> new NotFoundException("Event not found"));
     }
 
     private void isEventTimeValid(LocalDateTime eventTime) {

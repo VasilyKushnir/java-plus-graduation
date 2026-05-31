@@ -1,5 +1,6 @@
 package ewm.request.service;
 
+import client.CollectorClient;
 import ewm.interaction.client.event.EventClient;
 import ewm.interaction.client.user.UserClient;
 import ewm.interaction.dto.event.EventFullDto;
@@ -28,6 +29,7 @@ public class ParticipationRequestServiceImpl implements ParticipationRequestServ
     private final ParticipationRequestRepository requestRepo;
     private final UserClient userClient;
     private final EventClient eventClient;
+    private final CollectorClient collectorClient;
 
     @Override
     @Transactional
@@ -82,6 +84,8 @@ public class ParticipationRequestServiceImpl implements ParticipationRequestServ
                 throw new ConflictException("Participant limit reached");
             }
         }
+
+        collectorClient.sendRegistration(userId, eventId);
 
         ParticipationRequest saved = requestRepo.save(req);
         return ParticipationRequestMapper.toDto(saved);

@@ -1,27 +1,29 @@
 package ewm.event.service;
 
-import client.StatsClient;
+import client.AnalyzerClient;
+import client.CollectorClient;
 import ewm.event.mapper.CategoryMapper;
 import ewm.event.mapper.EventMapper;
 import ewm.event.model.Category;
 import ewm.event.model.Event;
 import ewm.event.repository.CategoryRepository;
-import ewm.event.repository.DatabaseEventSearchRepository;
-import ewm.event.repository.EventRepository;
 import ewm.interaction.client.request.RequestClient;
 import ewm.interaction.client.user.UserClient;
 import ewm.interaction.dto.category.CategoryDto;
 import ewm.interaction.dto.event.*;
+import ewm.interaction.dto.request.ParticipationRequestDto;
 import ewm.interaction.dto.user.UserDto;
 import ewm.interaction.dto.user.UserShortDto;
 import ewm.interaction.enums.EventSort;
 import ewm.interaction.enums.EventState;
+import ewm.interaction.enums.RequestStatus;
+import ewm.interaction.exception.BadRequestException;
+import feign.FeignException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import ru.practicum.ewm.stats.dto.EndpointHitDto;
-import ru.practicum.ewm.stats.dto.ViewStatsDto;
+import ru.practicum.ewm.stats.messages.RecommendedEventProto;
 
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -35,10 +37,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class EventServiceImpl implements EventService {
     private final CategoryRepository categoryRepository;
-    private final StatsClient statsClient;
+    private final AnalyzerClient analyzerClient;
 
     private final UserClient userClient;
     private final RequestClient requestClient;
+    private final CollectorClient collectorClient;
 
     private final EventTransactionalService eventTxService;
 
@@ -70,9 +73,10 @@ public class EventServiceImpl implements EventService {
     }
 
     @Override
-    public EventFullDto getPublicEvent(Long eventId, HttpServletRequest request) {
+    public EventFullDto getPublicEvent(Long userId, Long eventId, HttpServletRequest request) {
         Event event = eventTxService.getPublicEventTransactional(eventId);
-        registerHit(request);
+
+        collectorClient.sendView(userId, eventId);
         return this.mapToEventFullDto(List.of(event)).getFirst();
     }
 
@@ -100,10 +104,8 @@ public class EventServiceImpl implements EventService {
 
         List<EventShortDto> dtos = mapToEventShortDto(eventList);
         if (sort == EventSort.VIEWS) {
-            dtos.sort(Comparator.comparingLong(EventShortDto::getViews).reversed());
+            dtos.sort(Comparator.comparingDouble(EventShortDto::getRating).reversed());
         }
-
-        registerHit(request);
 
         return dtos;
     }
@@ -123,46 +125,37 @@ public class EventServiceImpl implements EventService {
         return this.mapToEventFullDto(eventList).getFirst();
     }
 
-    private void registerHit(HttpServletRequest request) {
-        EndpointHitDto endpointHitDto = new EndpointHitDto();
-        endpointHitDto.setApp("main-service");
-        endpointHitDto.setUri(request.getRequestURI());
-        endpointHitDto.setIp(request.getRemoteAddr());
-        endpointHitDto.setTimestamp(LocalDateTime.now());
-        statsClient.hit(endpointHitDto);
+    @Override
+    public void likeEvent(Long userId, Long eventId) {
+        try {
+            ParticipationRequestDto request = requestClient.getEventParticipationRequest(userId, eventId);
+            if (!RequestStatus.CONFIRMED.name().equals(request.getStatus())) {
+                throw new BadRequestException("User can only like attended events.");
+            }
+
+            collectorClient.sendLike(userId, eventId);
+        } catch (FeignException e) {
+            throw new BadRequestException("Error calling request-service.");
+        }
     }
 
-    private Map<Long, Integer> getEventsViews(List<Event> eventList) {
-        if (eventList == null || eventList.isEmpty()) return Map.of();
-
-        List<String> uris = eventList.stream()
-                .map(e -> "/events/" + e.getId())
+    @Override
+    public List<EventFullDto> getRecommendations(Long userId, Integer maxResults) {
+        List<Long> ids = analyzerClient.getRecommendations(userId, maxResults)
+                .stream()
+                .map(RecommendedEventProto::getEventId)
                 .toList();
 
-        LocalDateTime start = eventList.stream()
-                .map(Event::getCreatedOn)
-                .filter(java.util.Objects::nonNull)
-                .min(Comparator.naturalOrder())
-                .orElse(LocalDateTime.now().minusYears(1));
+        List<Event> events = eventTxService.getAllByIdTransactional(ids);
+        List<EventFullDto> dtos = this.mapToEventFullDto(events);
 
-        LocalDateTime end = LocalDateTime.now();
-
-        try {
-            List<ViewStatsDto> stats = statsClient.getStats(start, end, uris, true);
-
-            Map<Long, Integer> map = new HashMap<>();
-            for (ViewStatsDto s : stats) {
-                String[] parts = s.getUri().split("/");
-                if (parts.length >= 3) {
-                    long eventId = Long.parseLong(parts[2]);
-                    map.put(eventId, (int) s.getHits());
-                }
-            }
-            return map;
-        } catch (Exception ex) {
-            // критично: не роняем эндпоинт
-            return Map.of();
+        Map<Long, Integer> order = new HashMap<>();
+        for (int i = 0; i < ids.size(); i++) {
+            order.put(ids.get(i), i);
         }
+
+        dtos.sort(Comparator.comparingInt(dto -> order.getOrDefault(dto.getId(), Integer.MAX_VALUE)));
+        return dtos;
     }
 
     private List<EventFullDto> mapToEventFullDto(List<Event> eventList) {
@@ -170,15 +163,15 @@ public class EventServiceImpl implements EventService {
             return List.of();
         }
 
-        Map<Long, Integer> views = getEventsViews(eventList);
         Map<Long, Integer> confirmed = getConfirmedRequests(eventList);
         Map<Long, UserShortDto> initiators = getInitiatorsDtoForEvents(eventList);
         Map<Long, CategoryDto> categories = getCategoriesDtoForEvents(eventList);
+        Map<Long, Double> ratings = getRatingsForEvents(eventList);
 
         return eventList.stream()
                 .map(e -> EventMapper.mapToEventFullDto(
                         e,
-                        views.getOrDefault(e.getId(), 0),
+                        ratings.getOrDefault(e.getId(), 0.0),
                         confirmed.getOrDefault(e.getId(), 0),
                         initiators.get(e.getInitiatorId()),
                         categories.get(e.getCategoryId())
@@ -216,6 +209,11 @@ public class EventServiceImpl implements EventService {
                 .collect(Collectors.toMap(CategoryDto::getId, c -> c));
     }
 
+    private Map<Long, Double> getRatingsForEvents(List<Event> eventList) {
+        List<Long> eventIds = eventList.stream().map(Event::getId).toList();
+        return analyzerClient.getInteractionsCount(eventIds);
+    }
+
 
     @Override
     public List<EventShortDto> mapToEventShortDto(List<Event> eventList) {
@@ -223,19 +221,24 @@ public class EventServiceImpl implements EventService {
             return List.of();
         }
 
-        Map<Long, Integer> views = getEventsViews(eventList);
         Map<Long, Integer> confirmed = getConfirmedRequests(eventList);
         Map<Long, UserShortDto> initiators = getInitiatorsDtoForEvents(eventList);
         Map<Long, CategoryDto> categories = getCategoriesDtoForEvents(eventList);
+        Map<Long, Double> ratings = getRatingsForEvents(eventList);
 
         return eventList.stream()
                 .map(e -> EventMapper.mapToEventShortDto(
                         e,
-                        views.getOrDefault(e.getId(), 0),
+                        ratings.getOrDefault(e.getId(), 0.0),
                         confirmed.getOrDefault(e.getId(), 0),
                         initiators.get(e.getInitiatorId()),
                         categories.get(e.getCategoryId())
                 ))
                 .toList();
+    }
+
+    @Override
+    public EventFullDto getEventById(Long eventId) {
+        return this.mapToEventFullDto(List.of(eventTxService.findByIdTransactional(eventId))).getFirst();
     }
 }
