@@ -1,0 +1,35 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        format_sql: true
+  sql:
+    init:
+      mode: always
+  datasource:
+    url: jdbc:postgresql://localhost:5437/analyzer
+    driverClassName: org.postgresql.Driver
+    username: analyzer
+    password: analyzer
+
+application:
+  action-weight:
+    view: 0.4
+    register: 0.8
+    like: 1.0
+
+  kafka:
+    consumer:
+      bootstrap-servers: "localhost:9092"
+      group-id:
+        user-action: "analyzer-user-action"
+        event-similarity: "analyzer-event-similarity"
+    topics:
+      user-actions: "stats.user-actions.v1"
+      events-similarity: "stats.events-similarity.v1"
+
+grpc:
+  server:
+    port: 0

@@ -33,7 +33,7 @@ public class EventMapper {
 
     public static EventFullDto mapToEventFullDto(
             Event event,
-            long views,
+            double rating,
             long confirmedRequests,
             UserShortDto initiatorDto,
             CategoryDto categoryDto) {
@@ -55,7 +55,7 @@ public class EventMapper {
         eventFullDto.setParticipantLimit(event.getParticipantLimit());
         eventFullDto.setRequestModeration(event.getRequestModeration());
         eventFullDto.setState(event.getState() == null ? null : event.getState().name());
-        eventFullDto.setViews(views);
+        eventFullDto.setRating(rating);
 
         // TODO Request
         eventFullDto.setConfirmedRequests(confirmedRequests);
@@ -65,7 +65,7 @@ public class EventMapper {
 
     public static EventShortDto mapToEventShortDto(
             Event event,
-            long views,
+            double rating,
             long confirmedRequests,
             UserShortDto initiatorDto,
             CategoryDto categoryDto) {
@@ -77,7 +77,7 @@ public class EventMapper {
 
         // TODO Request
         eventShortDto.setConfirmedRequests(confirmedRequests);
-        eventShortDto.setViews(views);
+        eventShortDto.setRating(rating);
         eventShortDto.setEventDate(event.getEventDate());
         eventShortDto.setInitiator(initiatorDto);
         eventShortDto.setPaid(event.getPaid());

@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 
 @FeignClient(name = "event-service", configuration = FeignConfiguration.class)
 public interface EventClient {
-    @GetMapping("/events/{eventId}")
+    @GetMapping("/admin/events/{eventId}")
     EventFullDto getEvent(@PathVariable Long eventId);
 
     @PatchMapping("/admin/events/{eventId}")
