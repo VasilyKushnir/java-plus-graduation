@@ -19,8 +19,14 @@ public interface UserActionRepository extends JpaRepository<UserAction, Long> {
     @Query("SELECT a.eventId FROM UserAction a WHERE a.userId = :userId")
     Set<Long> findAllEventIdsByUserId(Long userId);
 
-    @Query("SELECT a.eventId, SUM(a.weight) FROM UserAction a WHERE a.eventId IN :eventIds GROUP BY a.eventId")
-    List<Object[]> sumWeightsByEventIds(List<Long> eventIds);
+    @Query("""
+            SELECT a.eventId as eventId,
+                   SUM(a.weight) as weight
+            FROM UserAction a
+            WHERE a.eventId IN :eventIds
+            GROUP BY a.eventId
+            """)
+    List<EventWeightProjection> sumWeightsByEventIds(List<Long> eventIds);
 
     List<UserAction> findAllByUserId(Long userId, PageRequest pageRequest);
 }

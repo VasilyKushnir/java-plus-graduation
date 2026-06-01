@@ -18,7 +18,7 @@ import ru.practicum.ewm.stats.avro.UserActionAvro;
 public class AnalyzerServiceImpl implements AnalyzerService {
     private final EventSimilarityRepository similarityRepository;
     private final UserActionRepository actionRepository;
-    private final UserActionMapper  userActionMapper;
+    private final UserActionMapper userActionMapper;
 
     @Override
     public void analyzeEventSimilarity(EventSimilarityAvro similarityAvro) {
@@ -28,13 +28,11 @@ public class AnalyzerServiceImpl implements AnalyzerService {
             similarityRepository.save(similarity);
         } else {
             EventSimilarity oldSimilarity = similarityRepository
-                    .findByEventAAndEventB(similarity.getEventA(), similarity.getEventB())
-                    .get();
-            if (similarity.getScore() > oldSimilarity.getScore()) {
-                oldSimilarity.setScore(similarity.getScore());
-                oldSimilarity.setTimestamp(similarity.getTimestamp());
-                similarityRepository.save(oldSimilarity);
-            }
+                    .findByEventAAndEventB(similarity.getEventA(), similarity.getEventB()).get();
+
+            oldSimilarity.setScore(similarity.getScore());
+            oldSimilarity.setTimestamp(similarity.getTimestamp());
+            similarityRepository.save(oldSimilarity);
         }
     }
 

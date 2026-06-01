@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import ru.practicum.ewm.analyzer.model.EventSimilarity;
 import ru.practicum.ewm.analyzer.model.UserAction;
 import ru.practicum.ewm.analyzer.repository.EventSimilarityRepository;
+import ru.practicum.ewm.analyzer.repository.EventWeightProjection;
 import ru.practicum.ewm.analyzer.repository.UserActionRepository;
 import ru.practicum.ewm.stats.messages.InteractionsCountRequestProto;
 import ru.practicum.ewm.stats.messages.RecommendedEventProto;
@@ -15,11 +16,13 @@ import ru.practicum.ewm.stats.messages.UserPredictionsRequestProto;
 
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @RequiredArgsConstructor
 @Component
-public class RecommendationsHandlerImpl implements RecommendationsHandler{
+public class RecommendationsHandlerImpl implements RecommendationsHandler {
+
+    private static final int K_NEIGHBOURS = 10;
+
     private final UserActionRepository actionRepository;
     private final EventSimilarityRepository similarityRepository;
 
@@ -58,44 +61,14 @@ public class RecommendationsHandlerImpl implements RecommendationsHandler{
                 .collect(Collectors.toMap(
                         UserAction::getEventId,
                         UserAction::getWeight,
-                        Math::max
+                        Double::max
                 ));
 
         // Находим события, похожие на те, которые пользователь уже видел.
         // Выполняется один запрос в БД.
-        List<EventSimilarity> candidateSimilarities =
+        List<EventSimilarity> similarities =
                 similarityRepository.findAllByEventAInOrEventBIn(
                         seenEventIds,
-                        seenEventIds,
-                        PageRequest.of(
-                                0,
-                                limit * 2,
-                                Sort.by(Sort.Direction.DESC, "score")
-                        )
-                );
-
-        // Из найденных связей собираем события-кандидаты.
-        // Исключаем события, которые пользователь уже видел.
-        Set<Long> candidateIds = candidateSimilarities.stream()
-                .flatMap(similarity ->
-                        Stream.of(
-                                similarity.getEventA(),
-                                similarity.getEventB()
-                        )
-                )
-                .filter(id -> !seenEventIds.contains(id))
-                .collect(Collectors.toSet());
-
-        if (candidateIds.isEmpty()) {
-            return List.of();
-        }
-
-        // Получаем все связи между кандидатами и уже просмотренными событиями.
-        // Раньше здесь выполнялись запросы внутри цикла.
-        // Теперь выполняется один запрос.
-        List<EventSimilarity> relevantSimilarities =
-                similarityRepository.findAllByEventAInOrEventBIn(
-                        candidateIds,
                         seenEventIds,
                         PageRequest.of(
                                 0,
@@ -104,58 +77,76 @@ public class RecommendationsHandlerImpl implements RecommendationsHandler{
                         )
                 );
 
-        // Для каждого кандидата будем накапливать:
-        // 1. сумму score * weight
-        // 2. сумму score
-        Map<Long, ScoreAccumulator> scores = new HashMap<>();
-
-        for (EventSimilarity similarity : relevantSimilarities) {
-
-            Long candidateId;
-            Long seenEventId;
-
-            // Определяем, какая сторона является кандидатом,
-            // а какая относится к уже просмотренным пользователем событиям.
-            if (candidateIds.contains(similarity.getEventA())
-                    && seenEventIds.contains(similarity.getEventB())) {
-
-                candidateId = similarity.getEventA();
-                seenEventId = similarity.getEventB();
-
-            } else if (candidateIds.contains(similarity.getEventB())
-                    && seenEventIds.contains(similarity.getEventA())) {
-
-                candidateId = similarity.getEventB();
-                seenEventId = similarity.getEventA();
-
-            } else {
-                continue;
-            }
-
-            double score = similarity.getScore();
-
-            // Получаем вес пользовательского действия.
-            // Если по какой-то причине вес отсутствует,
-            // используем значение по умолчанию.
-            double weight = actionWeights.getOrDefault(seenEventId, 1.0);
-
-            ScoreAccumulator accumulator = scores.computeIfAbsent(
-                    candidateId,
-                    id -> new ScoreAccumulator()
-            );
-
-            accumulator.add(score, weight);
+        if (similarities.isEmpty()) {
+            return List.of();
         }
 
-        // Формируем итоговый список рекомендаций.
-        return scores.entrySet()
+        /*
+         * Кандидат -> список сходств с просмотренными событиями.
+         *
+         * Именно это соответствует замечанию ревьюера:
+         * сначала отбираем кандидатов,
+         * потом для каждого кандидата выбираем K ближайших соседей.
+         */
+        Map<Long, List<EventSimilarity>> candidateSimilarities =
+                new HashMap<>();
+
+        for (EventSimilarity similarity : similarities) {
+
+            Long eventA = similarity.getEventA();
+            Long eventB = similarity.getEventB();
+
+            boolean aSeen = seenEventIds.contains(eventA);
+            boolean bSeen = seenEventIds.contains(eventB);
+
+            // A просмотрено -> B кандидат
+            if (aSeen && !bSeen) {
+                candidateSimilarities
+                        .computeIfAbsent(
+                                eventB,
+                                id -> new ArrayList<>()
+                        )
+                        .add(similarity);
+            }
+
+            // B просмотрено -> A кандидат
+            if (bSeen && !aSeen) {
+                candidateSimilarities
+                        .computeIfAbsent(
+                                eventA,
+                                id -> new ArrayList<>()
+                        )
+                        .add(similarity);
+            }
+        }
+
+        // Для каждого кандидата выбираем K ближайших соседей и считаем прогнозную оценку
+        return candidateSimilarities.entrySet()
                 .stream()
-                .map(entry ->
-                        RecommendedEventProto.newBuilder()
-                                .setEventId(entry.getKey())
-                                .setScore(entry.getValue().getFinalScore())
-                                .build()
-                )
+                .map(entry -> {
+
+                    List<EventSimilarity> topNeighbours =
+                            entry.getValue()
+                                    .stream()
+                                    .sorted(
+                                            Comparator.comparing(
+                                                            EventSimilarity::getScore)
+                                                    .reversed()
+                                    )
+                                    .limit(K_NEIGHBOURS)
+                                    .toList();
+
+                    double score = calculateScore(
+                            topNeighbours,
+                            seenEventIds,
+                            actionWeights
+                    );
+
+                    return RecommendedEventProto.newBuilder()
+                            .setEventId(entry.getKey())
+                            .setScore(score)
+                            .build();
+                })
                 .sorted(
                         Comparator.comparing(
                                         RecommendedEventProto::getScore)
@@ -163,6 +154,49 @@ public class RecommendationsHandlerImpl implements RecommendationsHandler{
                 )
                 .limit(limit)
                 .toList();
+    }
+
+    /**
+     * Вычисляет прогнозную оценку кандидата.
+     *
+     * Формула из ТЗ:
+     *
+     * Σ(weight × similarity) / Σ(similarity)
+     */
+    private double calculateScore(
+            List<EventSimilarity> similarities,
+            Set<Long> seenEventIds,
+            Map<Long, Double> actionWeights
+    ) {
+
+        double weightedSum = 0.0;
+        double similaritySum = 0.0;
+
+        for (EventSimilarity similarity : similarities) {
+
+            Long viewedEventId;
+
+            if (seenEventIds.contains(similarity.getEventA())) {
+                viewedEventId = similarity.getEventA();
+            } else {
+                viewedEventId = similarity.getEventB();
+            }
+
+            Double weight = actionWeights.get(viewedEventId);
+
+            if (weight == null) {
+                continue;
+            }
+
+            double similarityScore = similarity.getScore();
+
+            weightedSum += weight * similarityScore;
+            similaritySum += similarityScore;
+        }
+
+        return similaritySum == 0.0
+                ? 0.0
+                : weightedSum / similaritySum;
     }
 
     @Override
@@ -240,7 +274,6 @@ public class RecommendationsHandlerImpl implements RecommendationsHandler{
     public List<RecommendedEventProto> getInteractionsCount(
             InteractionsCountRequestProto request
     ) {
-
         List<Long> eventIds = request.getEventIdList();
 
         if (eventIds.isEmpty()) {
@@ -248,59 +281,15 @@ public class RecommendationsHandlerImpl implements RecommendationsHandler{
         }
 
         // Получаем агрегированную статистику по всем событиям
-        // одним запросом вместо отдельных запросов для каждого ID.
-        List<Object[]> results =
+        List<EventWeightProjection> results =
                 actionRepository.sumWeightsByEventIds(eventIds);
 
-        // Преобразуем результат в Map:
-        // eventId -> суммарный вес взаимодействий
-        Map<Long, Double> weightMap = results.stream()
-                .collect(Collectors.toMap(
-                        row -> (Long) row[0],
-                        row -> (Double) row[1]
-                ));
-
-        return weightMap.entrySet()
-                .stream()
-                .map(entry ->
-                        RecommendedEventProto.newBuilder()
-                                .setEventId(entry.getKey())
-                                .setScore(entry.getValue())
-                                .build()
-                )
-                .sorted(
-                        Comparator.comparing(
-                                        RecommendedEventProto::getScore)
-                                .reversed()
-                )
+        return results.stream()
+                .map(r -> RecommendedEventProto.newBuilder()
+                        .setEventId(r.getEventId())
+                        .setScore(r.getWeight())
+                        .build())
+                .sorted(Comparator.comparing(RecommendedEventProto::getScore).reversed())
                 .toList();
     }
-
-    /**
-     * Накапливает промежуточные значения,
-     * необходимые для вычисления итогового рейтинга рекомендации.
-     *
-     * Формула:
-     *
-     * итоговый рейтинг =
-     * Σ(score * weight) / Σ(score)
-     */
-    private static class ScoreAccumulator {
-
-        private double weightedScoreSum;
-
-        private double similarityScoreSum;
-
-        void add(double similarityScore, double weight) {
-            weightedScoreSum += similarityScore * weight;
-            similarityScoreSum += similarityScore;
-        }
-
-        double getFinalScore() {
-            return similarityScoreSum == 0
-                    ? 0
-                    : weightedScoreSum / similarityScoreSum;
-        }
-    }
-
 }

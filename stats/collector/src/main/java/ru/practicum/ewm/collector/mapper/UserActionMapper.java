@@ -26,7 +26,7 @@ public class UserActionMapper {
             case ACTION_VIEW -> ActionTypeAvro.VIEW;
             case ACTION_REGISTER -> ActionTypeAvro.REGISTER;
             case ACTION_LIKE -> ActionTypeAvro.LIKE;
-            case UNRECOGNIZED -> null;
+            case UNRECOGNIZED -> throw new IllegalArgumentException("Unrecognized action type: " + actionTypeProto);
         };
     }
 }

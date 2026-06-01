@@ -85,9 +85,10 @@ public class ParticipationRequestServiceImpl implements ParticipationRequestServ
             }
         }
 
+        ParticipationRequest saved = requestRepo.save(req);
+
         collectorClient.sendRegistration(userId, eventId);
 
-        ParticipationRequest saved = requestRepo.save(req);
         return ParticipationRequestMapper.toDto(saved);
     }
 

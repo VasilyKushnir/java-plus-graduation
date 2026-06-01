@@ -55,13 +55,16 @@ public class AggregatorStarter {
                     }
                 }
 
+                producer.flush();
                 consumer.commitSync();
             }
         } catch (WakeupException ignore) {
         } finally {
             try {
+                producer.flush();
                 consumer.commitSync();
             } finally {
+                producer.close();
                 consumer.close();
             }
         }
